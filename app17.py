@@ -16,21 +16,39 @@ def criar_preferencia_pagamento(uid, valor_fichas, preco):
     sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN"))
     
     preference_data = {
-        "items": [{"title": f"Pacote de {valor_fichas} Fichas", "quantity": 1, "unit_price": float(preco)}],
-        "payer": {"name": "Comprador", "surname": "Teste", "email": "teste@test.com"},
+        "items": [
+            {
+                "title": f"Pacote de {valor_fichas} Fichas", 
+                "quantity": 1, 
+                "unit_price": float(preco)
+            }
+        ],
+        "payer": {
+            "name": "Comprador",
+            "surname": "Teste",
+            "email": "teste@test.com"
+        },
         "external_reference": uid,
+        "back_urls": {
+            "success": "https://geraloto.streamlit.app/",
+            "failure": "https://geraloto.streamlit.app/",
+            "pending": "https://geraloto.streamlit.app/"
+        },
         "auto_return": "approved"
     }
     
-    result = sdk.preference().create(preference_data)
-    
-    # DEBUG: Vamos verificar o que o MP está retornando
-    st.write("DEBUG - Retorno do Mercado Pago:", result)
-    
-    if "response" in result:
-        return result["response"].get("init_point"), result["response"].get("id")
-    else:
-        st.error("Erro ao comunicar com Mercado Pago. Verifique suas credenciais.")
+    # Adicionamos um tratamento mais robusto aqui
+    try:
+        result = sdk.preference().create(preference_data)
+        
+        if result.get("status") == 200 or result.get("status") == 201:
+            return result["response"]["init_point"], result["response"]["id"]
+        else:
+            st.error(f"Erro no Mercado Pago: {result.get('message', 'Erro desconhecido')}")
+            return None, None
+            
+    except Exception as e:
+        st.error(f"Erro ao conectar com Mercado Pago: {str(e)}")
         return None, None
 
 def verificar_pagamento_aprovado():
