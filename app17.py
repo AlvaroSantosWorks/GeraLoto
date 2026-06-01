@@ -17,9 +17,19 @@ def criar_preferencia_pagamento(uid, valor_fichas, preco):
     
     preference_data = {
         "items": [
-            {"title": f"Pacote de {valor_fichas} Fichas", "quantity": 1, "unit_price": float(preco)}
+            {
+                "title": f"Pacote de {valor_fichas} Fichas", 
+                "quantity": 1, 
+                "unit_price": float(preco)
+            }
         ],
-        "external_reference": uid,  # Isso é crucial: associa o pagamento ao usuário
+        # Adicione este bloco para evitar bloqueios de validação
+        "payer": {
+            "name": "Comprador",
+            "surname": "Teste",
+            "email": "test_user_12345@test.com" # Importante: não use o e-mail da sua conta de vendedor!
+        },
+        "external_reference": uid,  # Associa o pagamento ao seu usuário do app
         "back_urls": {
             "success": "https://geraloto.streamlit.app/",
             "failure": "https://geraloto.streamlit.app/",
@@ -29,7 +39,7 @@ def criar_preferencia_pagamento(uid, valor_fichas, preco):
     }
     
     result = sdk.preference().create(preference_data)
-    return result["response"]["init_point"] # Link para o usuário pagar
+    return result["response"]["init_point"]
 
 def verificar_pagamento_aprovado(uid):
     # Lembre-se: Use a variável de ambiente para o Access Token!
