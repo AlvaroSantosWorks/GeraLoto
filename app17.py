@@ -54,27 +54,21 @@ def criar_preferencia_pagamento(uid, valor_fichas, preco):
 def verificar_pagamento_aprovado():
     sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN"))
     
-    # Buscamos pagamentos ordenados pela data de criação (mais recentes primeiro)
-    # Não filtramos pelo status aqui, vamos verificar dentro do código
+    # Busca apenas pelo ID do usuário
     search_result = sdk.payment().search({
         "filters": {
             "external_reference": st.session_state["user_uid"]
-        },
-        "sort": "date_created",
-        "criteria": "desc"
+        }
     })
     
     if search_result.get("status") == 200:
         pagamentos = search_result["response"].get("results", [])
+        # DEBUG: Isso vai te mostrar na tela tudo o que o MP encontrou
+        # st.write("Pagamentos encontrados:", pagamentos) 
         
         for p in pagamentos:
-            # Verificamos se o pagamento é recente (ex: feito nos últimos 10 minutos)
-            # E se o status está como 'approved'
             if p["status"] == "approved":
-                # DICA: Verifique se esse ID de pagamento já não foi processado antes
-                # para evitar que o usuário ganhe fichas duas vezes pelo mesmo pagamento
                 return True
-    
     return False
 
 
@@ -333,24 +327,20 @@ st.sidebar.info(f"🪙 Saldo: {st.session_state['fichas']}")
 # Botão de verificar pagamento agora está seguro aqui dentro
 # --- BOTÃO DE VERIFICAR NO SIDEBAR ---
 if st.sidebar.button("Verificar Pagamento de Fichas"):
-    if "pref_id" in st.session_state:
-        with st.spinner("Consultando Mercado Pago..."):
-            if verificar_pagamento_aprovado(st.session_state["pref_id"]):
-                # Pega a quantidade correta do pacote escolhido
-                adicionar = st.session_state.get("fichas_a_adicionar", 1000)
-                novo_saldo = st.session_state["fichas"] + adicionar
-                
-                atualizar_saldo_nuvem(st.session_state["user_uid"], st.session_state["id_token"], novo_saldo)
-                st.session_state["fichas"] = novo_saldo
-                st.success(f"Pagamento confirmado! +{adicionar} fichas.")
-                
-                # Limpa os estados de pagamento
-                del st.session_state["link_pagamento"]
-                del st.session_state["pref_id"]
-            else:
-                st.error("Pagamento ainda não confirmado pelo Mercado Pago.")
-    else:
-        st.warning("Gere um link primeiro!")
+    with st.spinner("Consultando Mercado Pago..."):
+        # Chamada sem parâmetros!
+        if verificar_pagamento_aprovado():
+            adicionar = st.session_state.get("fichas_a_adicionar", 1000)
+            novo_saldo = st.session_state["fichas"] + adicionar
+            
+            atualizar_saldo_nuvem(st.session_state["user_uid"], st.session_state["id_token"], novo_saldo)
+            st.session_state["fichas"] = novo_saldo
+            st.success(f"Pagamento confirmado! +{adicionar} fichas.")
+            
+            # Limpa o estado após sucesso
+            st.session_state["link_pagamento"] = None
+        else:
+            st.error("Nenhum pagamento aprovado encontrado.")
 
 if st.sidebar.button("🚪 Sair"): 
     st.session_state.clear()
