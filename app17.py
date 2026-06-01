@@ -11,6 +11,14 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.neural_network import MLPRegressor
 
+# --- LER RETORNO DO MERCADO PAGO ---
+params = st.query_params
+if "status" in params and params["status"] == "approved":
+    payment_id = params.get("payment_id")
+    # Aqui você pode chamar a função que adiciona fichas!
+    st.success(f"Pagamento aprovado! ID: {payment_id}")
+    # Opcional: Adicionar a lógica de fichas aqui automaticamente
+
 # --- PAGAMENTO ---
 def criar_preferencia_pagamento(uid, valor_fichas, preco):
     sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN"))
@@ -51,25 +59,16 @@ def criar_preferencia_pagamento(uid, valor_fichas, preco):
         st.error(f"Erro ao conectar com Mercado Pago: {str(e)}")
         return None, None
 
-def verificar_pagamento_aprovado():
+def confirmar_pagamento(payment_id):
     sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN"))
+    payment = sdk.payment().get(payment_id)
     
-    # Busca apenas pelo ID do usuário
-    search_result = sdk.payment().search({
-        "filters": {
-            "external_reference": st.session_state["user_uid"]
-        }
-    })
-    
-    if search_result.get("status") == 200:
-        pagamentos = search_result["response"].get("results", [])
-        # DEBUG: Isso vai te mostrar na tela tudo o que o MP encontrou
-        # st.write("Pagamentos encontrados:", pagamentos) 
-        
-        for p in pagamentos:
-            if p["status"] == "approved":
-                return True
-    return False
+    if payment["status"] == 200:
+        data = payment["response"]
+        # Verifica se é o usuário correto e se está aprovado
+        if data["status"] == "approved" and data["external_reference"] == st.session_state["user_uid"]:
+            return True, int(data["transaction_amount"]) # Retorna sucesso e o valor
+    return False, 0
 
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
