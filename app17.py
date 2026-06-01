@@ -42,17 +42,23 @@ def criar_preferencia_pagamento(uid, valor_fichas, preco):
     return result["response"]["init_point"]
 
 def verificar_pagamento_aprovado(uid):
-    # Lembre-se: Use a variável de ambiente para o Access Token!
     sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN"))
     
-    # Busca pagamentos realizados pelo usuário (usando o external_reference)
+    # Filtra pelos aprovados
     filters = {"external_reference": uid, "status": "approved"}
     search_result = sdk.payment().search({"filters": filters})
     
     if search_result["status"] == 200:
         pagamentos = search_result["response"]["results"]
+        # Debug: isso vai aparecer na sua tela quando clicar no botão
+        st.write(f"DEBUG: Pagamentos encontrados: {len(pagamentos)}")
+        
         if len(pagamentos) > 0:
-            return True # Pagamento aprovado encontrado
+            # Mostra o ID do último pagamento encontrado para sabermos se é o mesmo
+            st.write(f"DEBUG: ID do último pagamento: {pagamentos[-1]['id']}")
+            return True
+    else:
+        st.error(f"Erro na API: {search_result['status']}")
     return False
 
 
