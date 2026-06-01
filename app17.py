@@ -14,51 +14,27 @@ from sklearn.neural_network import MLPRegressor
 # --- PAGAMENTO ---
 def criar_preferencia_pagamento(uid, valor_fichas, preco):
     sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN"))
-    
     preference_data = {
-        "items": [
-            {
-                "title": f"Pacote de {valor_fichas} Fichas", 
-                "quantity": 1, 
-                "unit_price": float(preco)
-            }
-        ],
-        # Adicione este bloco para evitar bloqueios de validação
-        "payer": {
-            "name": "Comprador",
-            "surname": "Teste",
-            "email": "test_user_12345@test.com" # Importante: não use o e-mail da sua conta de vendedor!
-        },
-        "external_reference": uid,  # Associa o pagamento ao seu usuário do app
-        "back_urls": {
-            "success": "https://geraloto.streamlit.app/",
-            "failure": "https://geraloto.streamlit.app/",
-            "pending": "https://geraloto.streamlit.app/"
-        },
+        "items": [{"title": f"Pacote de {valor_fichas} Fichas", "quantity": 1, "unit_price": float(preco)}],
+        "payer": {"name": "Comprador", "surname": "Teste", "email": "teste@test.com"},
+        "external_reference": uid,
         "auto_return": "approved"
     }
-    
     result = sdk.preference().create(preference_data)
-    return result["response"]["init_point"]
+    # Retorna o link E o ID da preferência
+    return result["response"]["init_point"], result["response"]["id"]
 
-def verificar_pagamento_aprovado(uid):
+def verificar_pagamento_aprovado():
     sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN"))
     
-    # Filtra pelos aprovados
-    filters = {"external_reference": uid, "status": "approved"}
-    search_result = sdk.payment().search({"filters": filters})
+    # Busca pagamentos associados a esta preferência específica
+    search_result = sdk.payment().search({"filters": {"preference_id": st.session_state["pref_id"]}})
     
     if search_result["status"] == 200:
         pagamentos = search_result["response"]["results"]
-        # Debug: isso vai aparecer na sua tela quando clicar no botão
-        st.write(f"DEBUG: Pagamentos encontrados: {len(pagamentos)}")
-        
-        if len(pagamentos) > 0:
-            # Mostra o ID do último pagamento encontrado para sabermos se é o mesmo
-            st.write(f"DEBUG: ID do último pagamento: {pagamentos[-1]['id']}")
-            return True
-    else:
-        st.error(f"Erro na API: {search_result['status']}")
+        for p in pagamentos:
+            if p["status"] == "approved":
+                return True
     return False
 
 
@@ -103,10 +79,11 @@ st.sidebar.subheader("🛒 Comprar Fichas")
 if "link_pagamento" not in st.session_state:
     st.session_state["link_pagamento"] = None
 
-if st.sidebar.button("Gerar Link: 1000 Fichas (R$ 10,00)"):
+if st.sidebar.button("Gerar Link: 1000 Fichas"):
     with st.spinner("Gerando..."):
-        # Gera o link e guarda no estado
-        st.session_state["link_pagamento"] = criar_preferencia_pagamento(st.session_state["user_uid"], 1000, 10.00)
+        link, pref_id = criar_preferencia_pagamento(st.session_state["user_uid"], 1000, 10.00)
+        st.session_state["link_pagamento"] = link
+        st.session_state["pref_id"] = pref_id # Salva o ID da preferência
 
 # Só mostra o botão de ir para o pagamento se o link existir
 if st.session_state["link_pagamento"]:
