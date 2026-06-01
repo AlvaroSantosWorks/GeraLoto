@@ -6,9 +6,45 @@ import os
 import csv
 import requests
 import math
+import mercadopago
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.neural_network import MLPRegressor
+
+# --- PAGAMENTO ---
+def criar_preferencia_pagamento(uid, valor_fichas, preco):
+    sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN"))
+    
+    preference_data = {
+        "items": [
+            {"title": f"Pacote de {valor_fichas} Fichas", "quantity": 1, "unit_price": float(preco)}
+        ],
+        "external_reference": uid,  # Isso é crucial: associa o pagamento ao usuário
+        "back_urls": {
+            "success": "https://geraloto.streamlit.app/",
+            "failure": "https://geraloto.streamlit.app/",
+            "pending": "https://geraloto.streamlit.app/"
+        },
+        "auto_return": "approved"
+    }
+    
+    result = sdk.preference().create(preference_data)
+    return result["response"]["init_point"] # Link para o usuário pagar
+
+def verificar_pagamento_aprovado(uid):
+    # Lembre-se: Use a variável de ambiente para o Access Token!
+    sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN"))
+    
+    # Busca pagamentos realizados pelo usuário (usando o external_reference)
+    filters = {"external_reference": uid, "status": "approved"}
+    search_result = sdk.payment().search({"filters": filters})
+    
+    if search_result["status"] == 200:
+        pagamentos = search_result["response"]["results"]
+        if len(pagamentos) > 0:
+            return True # Pagamento aprovado encontrado
+    return False
+
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="GeraLoto - Premium", page_icon="🎲", layout="wide")
@@ -28,6 +64,14 @@ def obter_saldo_nuvem(uid, id_token):
         atualizar_saldo_nuvem(uid, id_token, 1000)
         return 1000
     return 0
+
+def resetar_senha(email):
+    url = f"https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key={FIREBASE_WEB_API_KEY}"
+    payload = {
+        "requestType": "PASSWORD_RESET",
+        "email": email
+    }
+    return requests.post(url, json=payload).json()
 
 def atualizar_saldo_nuvem(uid, id_token, novo_saldo):
     url = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents/usuarios/{uid}"
@@ -195,23 +239,56 @@ class GeradorLoterias:
         self._salvar_gerados(jogos_validados)
         return jogos_validados
 
-# --- LOGIN ---
+# --- LOGIN E AUTENTICAÇÃO ---
 if "user_uid" not in st.session_state:
     st.title("🔒 GeraLoto - Acesso")
     escolha = st.radio("Selecione:", ["Iniciar Sessão", "Criar Conta"])
-    e = st.text_input("E-mail"); s = st.text_input("Senha", type="password")
+    e = st.text_input("E-mail")
+    s = st.text_input("Senha", type="password")
+    
     if st.button("Executar"):
         res = registar_utilizador(e, s) if escolha == "Criar Conta" else iniciar_sessao(e, s)
         if "error" in res: st.error(res["error"]["message"])
         else:
-            st.session_state["user_uid"] = res["localId"]; st.session_state["user_email"] = res["email"]; st.session_state["id_token"] = res["idToken"]; st.rerun()
-    st.stop()
+            st.session_state["user_uid"] = res["localId"]
+            st.session_state["user_email"] = res["email"]
+            st.session_state["id_token"] = res["idToken"]
+            st.rerun()
+            
+    # Botão de recuperação de senha dentro do bloco de login
+    if st.button("Esqueci minha senha"):
+        if e:
+            res = resetar_senha(e)
+            if "error" in res: st.error(res["error"]["message"])
+            else: st.success("E-mail de redefinição enviado!")
+        else:
+            st.warning("Digite seu e-mail acima primeiro.")
+    st.stop() # Interrompe a execução aqui até o usuário logar
 
-# --- PAINEL ---
-st.sidebar.title("👤 Perfil"); st.sidebar.success(st.session_state['user_email'])
-if "fichas" not in st.session_state: st.session_state["fichas"] = obter_saldo_nuvem(st.session_state["user_uid"], st.session_state["id_token"])
+# --- APÓS LOGIN (PAINEL DO USUÁRIO) ---
+st.sidebar.title("👤 Perfil")
+st.sidebar.success(st.session_state['user_email'])
+
+if "fichas" not in st.session_state: 
+    st.session_state["fichas"] = obter_saldo_nuvem(st.session_state["user_uid"], st.session_state["id_token"])
+
 st.sidebar.info(f"🪙 Saldo: {st.session_state['fichas']}")
-if st.sidebar.button("🚪 Sair"): st.session_state.clear(); st.rerun()
+
+# Botão de verificar pagamento agora está seguro aqui dentro
+if st.sidebar.button("Verificar Pagamento de Fichas"):
+    with st.spinner("Consultando Mercado Pago..."):
+        if verificar_pagamento_aprovado(st.session_state["user_uid"]):
+            novo_saldo = st.session_state["fichas"] + 1000
+            atualizar_saldo_nuvem(st.session_state["user_uid"], st.session_state["id_token"], novo_saldo)
+            st.session_state["fichas"] = novo_saldo
+            st.success("Pagamento confirmado!")
+        else:
+            st.error("Nenhum pagamento aprovado encontrado.")
+
+if st.sidebar.button("🚪 Sair"): 
+    st.session_state.clear()
+    st.rerun()
+
 
 # --- GERADOR ---
 st.title("🎲 Gerador Premium")
