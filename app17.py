@@ -79,6 +79,14 @@ def atualizar_saldo_nuvem(uid, id_token, novo_saldo):
     payload = {"fields": {"fichas": {"integerValue": str(novo_saldo)}}}
     requests.patch(url, headers=headers, json=payload)
 
+# --- ÁREA DE COMPRA ---
+st.sidebar.markdown("---")
+st.sidebar.subheader("🛒 Comprar Fichas")
+if st.sidebar.button("Pacote 1000 Fichas - R$ 10,00"):
+    with st.spinner("Gerando link de pagamento..."):
+        link = criar_preferencia_pagamento(st.session_state["user_uid"], 1000, 10.00)
+        st.sidebar.link_button("Ir para o Pagamento", link)
+
 def salvar_aposta_no_firestore(uid, id_token, jogos, concurso_alvo):
     url = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents/apostas_pendentes"
     headers = {"Authorization": f"Bearer {id_token}"}
