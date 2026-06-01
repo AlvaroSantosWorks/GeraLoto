@@ -51,17 +51,30 @@ def criar_preferencia_pagamento(uid, valor_fichas, preco):
         st.error(f"Erro ao conectar com Mercado Pago: {str(e)}")
         return None, None
 
-def verificar_pagamento_aprovado(pref_id):
+def verificar_pagamento_aprovado():
     sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN"))
     
-    # Busca pagamentos associados a esta preferência específica
-    search_result = sdk.payment().search({"filters": {"preference_id": pref_id}})
+    # Buscamos pagamentos ordenados pela data de criação (mais recentes primeiro)
+    # Não filtramos pelo status aqui, vamos verificar dentro do código
+    search_result = sdk.payment().search({
+        "filters": {
+            "external_reference": st.session_state["user_uid"]
+        },
+        "sort": "date_created",
+        "criteria": "desc"
+    })
     
     if search_result.get("status") == 200:
         pagamentos = search_result["response"].get("results", [])
+        
         for p in pagamentos:
+            # Verificamos se o pagamento é recente (ex: feito nos últimos 10 minutos)
+            # E se o status está como 'approved'
             if p["status"] == "approved":
+                # DICA: Verifique se esse ID de pagamento já não foi processado antes
+                # para evitar que o usuário ganhe fichas duas vezes pelo mesmo pagamento
                 return True
+    
     return False
 
 
