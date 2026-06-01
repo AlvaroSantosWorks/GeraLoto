@@ -82,10 +82,22 @@ def atualizar_saldo_nuvem(uid, id_token, novo_saldo):
 # --- ÁREA DE COMPRA ---
 st.sidebar.markdown("---")
 st.sidebar.subheader("🛒 Comprar Fichas")
-if st.sidebar.button("Pacote 1000 Fichas - R$ 10,00"):
-    with st.spinner("Gerando link de pagamento..."):
-        link = criar_preferencia_pagamento(st.session_state["user_uid"], 1000, 10.00)
-        st.sidebar.link_button("Ir para o Pagamento", link)
+
+# Inicializa o link no session_state para não perdê-lo
+if "link_pagamento" not in st.session_state:
+    st.session_state["link_pagamento"] = None
+
+if st.sidebar.button("Gerar Link: 1000 Fichas (R$ 10,00)"):
+    with st.spinner("Gerando..."):
+        # Gera o link e guarda no estado
+        st.session_state["link_pagamento"] = criar_preferencia_pagamento(st.session_state["user_uid"], 1000, 10.00)
+
+# Só mostra o botão de ir para o pagamento se o link existir
+if st.session_state["link_pagamento"]:
+    st.sidebar.link_button("Ir para o Pagamento", st.session_state["link_pagamento"])
+    if st.sidebar.button("Limpar Link"):
+        st.session_state["link_pagamento"] = None
+        st.rerun()
 
 def salvar_aposta_no_firestore(uid, id_token, jogos, concurso_alvo):
     url = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents/apostas_pendentes"
