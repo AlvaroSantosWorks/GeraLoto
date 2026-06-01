@@ -98,26 +98,29 @@ def atualizar_saldo_nuvem(uid, id_token, novo_saldo):
     payload = {"fields": {"fichas": {"integerValue": str(novo_saldo)}}}
     requests.patch(url, headers=headers, json=payload)
 
-# --- ÁREA DE COMPRA ---
+## --- ÁREA DE COMPRA ---
 st.sidebar.markdown("---")
 st.sidebar.subheader("🛒 Comprar Fichas")
 
-# Inicializa o link no session_state para não perdê-lo
-if "link_pagamento" not in st.session_state:
-    st.session_state["link_pagamento"] = None
+# Dicionário de pacotes: {Nome: (Fichas, Preço)}
+pacotes = {
+    "Pacote Iniciante (1000 fichas)": (1000, 10.00),
+    "Pacote Pro (2500 fichas)": (2500, 22.00),
+    "Pacote VIP (5000 fichas)": (5000, 40.00)
+}
 
-if st.sidebar.button("Gerar Link: 1000 Fichas"):
+escolha = st.sidebar.selectbox("Escolha seu pacote:", list(pacotes.keys()))
+qtd_fichas, valor = pacotes[escolha]
+
+if st.sidebar.button(f"Gerar Link: R$ {valor:.2f}"):
     with st.spinner("Gerando..."):
-        link, pref_id = criar_preferencia_pagamento(st.session_state["user_uid"], 1000, 10.00)
+        link, pref_id = criar_preferencia_pagamento(st.session_state["user_uid"], qtd_fichas, valor)
         st.session_state["link_pagamento"] = link
-        st.session_state["pref_id"] = pref_id # Salva o ID da preferência
+        st.session_state["pref_id"] = pref_id
+        st.session_state["fichas_a_adicionar"] = qtd_fichas # Guardamos o valor para o próximo passo
 
-# Só mostra o botão de ir para o pagamento se o link existir
-if st.session_state["link_pagamento"]:
+if st.session_state.get("link_pagamento"):
     st.sidebar.link_button("Ir para o Pagamento", st.session_state["link_pagamento"])
-    if st.sidebar.button("Limpar Link"):
-        st.session_state["link_pagamento"] = None
-        st.rerun()
 
 def salvar_aposta_no_firestore(uid, id_token, jogos, concurso_alvo):
     url = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents/apostas_pendentes"
@@ -320,14 +323,21 @@ if st.sidebar.button("Verificar Pagamento de Fichas"):
     if "pref_id" in st.session_state:
         with st.spinner("Consultando Mercado Pago..."):
             if verificar_pagamento_aprovado(st.session_state["pref_id"]):
-                novo_saldo = st.session_state["fichas"] + 1000
+                # Pega a quantidade correta do pacote escolhido
+                adicionar = st.session_state.get("fichas_a_adicionar", 1000)
+                novo_saldo = st.session_state["fichas"] + adicionar
+                
                 atualizar_saldo_nuvem(st.session_state["user_uid"], st.session_state["id_token"], novo_saldo)
                 st.session_state["fichas"] = novo_saldo
-                st.success("Pagamento confirmado!")
+                st.success(f"Pagamento confirmado! +{adicionar} fichas.")
+                
+                # Limpa os estados de pagamento
+                del st.session_state["link_pagamento"]
+                del st.session_state["pref_id"]
             else:
-                st.error("Nenhum pagamento aprovado encontrado para esta transação.")
+                st.error("Pagamento ainda não confirmado pelo Mercado Pago.")
     else:
-        st.warning("Você precisa gerar um link de pagamento primeiro!")
+        st.warning("Gere um link primeiro!")
 
 if st.sidebar.button("🚪 Sair"): 
     st.session_state.clear()
