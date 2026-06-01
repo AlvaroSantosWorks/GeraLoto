@@ -51,14 +51,14 @@ def criar_preferencia_pagamento(uid, valor_fichas, preco):
         st.error(f"Erro ao conectar com Mercado Pago: {str(e)}")
         return None, None
 
-def verificar_pagamento_aprovado():
+def verificar_pagamento_aprovado(pref_id):
     sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN"))
     
     # Busca pagamentos associados a esta preferência específica
-    search_result = sdk.payment().search({"filters": {"preference_id": st.session_state["pref_id"]}})
+    search_result = sdk.payment().search({"filters": {"preference_id": pref_id}})
     
-    if search_result["status"] == 200:
-        pagamentos = search_result["response"]["results"]
+    if search_result.get("status") == 200:
+        pagamentos = search_result["response"].get("results", [])
         for p in pagamentos:
             if p["status"] == "approved":
                 return True
@@ -315,15 +315,19 @@ if "fichas" not in st.session_state:
 st.sidebar.info(f"🪙 Saldo: {st.session_state['fichas']}")
 
 # Botão de verificar pagamento agora está seguro aqui dentro
+# --- BOTÃO DE VERIFICAR NO SIDEBAR ---
 if st.sidebar.button("Verificar Pagamento de Fichas"):
-    with st.spinner("Consultando Mercado Pago..."):
-        if verificar_pagamento_aprovado(st.session_state["user_uid"]):
-            novo_saldo = st.session_state["fichas"] + 1000
-            atualizar_saldo_nuvem(st.session_state["user_uid"], st.session_state["id_token"], novo_saldo)
-            st.session_state["fichas"] = novo_saldo
-            st.success("Pagamento confirmado!")
-        else:
-            st.error("Nenhum pagamento aprovado encontrado.")
+    if "pref_id" in st.session_state:
+        with st.spinner("Consultando Mercado Pago..."):
+            if verificar_pagamento_aprovado(st.session_state["pref_id"]):
+                novo_saldo = st.session_state["fichas"] + 1000
+                atualizar_saldo_nuvem(st.session_state["user_uid"], st.session_state["id_token"], novo_saldo)
+                st.session_state["fichas"] = novo_saldo
+                st.success("Pagamento confirmado!")
+            else:
+                st.error("Nenhum pagamento aprovado encontrado para esta transação.")
+    else:
+        st.warning("Você precisa gerar um link de pagamento primeiro!")
 
 if st.sidebar.button("🚪 Sair"): 
     st.session_state.clear()
