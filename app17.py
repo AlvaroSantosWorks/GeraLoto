@@ -14,15 +14,24 @@ from sklearn.neural_network import MLPRegressor
 # --- PAGAMENTO ---
 def criar_preferencia_pagamento(uid, valor_fichas, preco):
     sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN"))
+    
     preference_data = {
         "items": [{"title": f"Pacote de {valor_fichas} Fichas", "quantity": 1, "unit_price": float(preco)}],
         "payer": {"name": "Comprador", "surname": "Teste", "email": "teste@test.com"},
         "external_reference": uid,
         "auto_return": "approved"
     }
+    
     result = sdk.preference().create(preference_data)
-    # Retorna o link E o ID da preferência
-    return result["response"]["init_point"], result["response"]["id"]
+    
+    # DEBUG: Vamos verificar o que o MP está retornando
+    st.write("DEBUG - Retorno do Mercado Pago:", result)
+    
+    if "response" in result:
+        return result["response"].get("init_point"), result["response"].get("id")
+    else:
+        st.error("Erro ao comunicar com Mercado Pago. Verifique suas credenciais.")
+        return None, None
 
 def verificar_pagamento_aprovado():
     sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN"))
