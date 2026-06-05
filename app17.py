@@ -10,27 +10,19 @@ import mercadopago
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.neural_network import MLPRegressor
+from dotenv import load_dotenv
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="GeraLoto - Premium", page_icon="🎲", layout="wide")
+
+# Carrega as variáveis do arquivo .env local
+load_dotenv()
 
 # --- CHAVES DO FIREBASE ---
 FIREBASE_WEB_API_KEY = os.environ.get("FIREBASE_WEB_API_KEY")
 PROJECT_ID = os.environ.get("PROJECT_ID")
 
-# --- FUNÇÕES DE PAGAMENTO ---
-def verificar_pagamento_aprovado():
-    sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN"))
-    search_result = sdk.payment().search({
-        "filters": {"external_reference": st.session_state.get("user_uid", "")}
-    })
-    if search_result.get("status") == 200:
-        pagamentos = search_result["response"].get("results", [])
-        for p in pagamentos:
-            if p["status"] == "approved":
-                return True
-    return False
-
+# --- FUNÇÕES DE PAGAMENTO (MERCADO PAGO) ---
 def criar_preferencia_pagamento(uid, valor_fichas, preco):
     sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN"))
     preference_data = {
@@ -69,67 +61,120 @@ def atualizar_saldo_nuvem(uid, id_token, novo_saldo):
     payload = {"fields": {"fichas": {"integerValue": str(novo_saldo)}}}
     requests.patch(url, headers=headers, json=payload)
 
-def resetar_senha(email):
-    url = f"https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key={FIREBASE_WEB_API_KEY}"
-    return requests.post(url, json={"requestType": "PASSWORD_RESET", "email": email}).json()
-
 def salvar_aposta_no_firestore(uid, id_token, jogos, concurso_alvo):
     url = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents/apostas_pendentes"
     headers = {"Authorization": f"Bearer {id_token}"}
     for jogo in jogos:
-        payload = {"fields": {"uid": {"stringValue": uid}, "concurso_alvo": {"integerValue": str(concurso_alvo)}, "numeros": {"arrayValue": {"values": [{"integerValue": str(n)} for n in jogo]}}, "status": {"stringValue": "pendente"}}}
+        payload = {
+            "fields": {
+                "uid": {"stringValue": uid},
+                "concurso_alvo": {"integerValue": str(concurso_alvo)},
+                "numeros": {"arrayValue": {"values": [{"integerValue": str(n)} for n in jogo]}},
+                "status": {"stringValue": "pendente"}
+            }
+        }
         requests.post(url, headers=headers, json=payload)
 
 def buscar_apostas_pendentes(uid, id_token):
     url = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents:runQuery"
     headers = {"Authorization": f"Bearer {id_token}"}
-    query = {"structuredQuery": {"from": [{"collectionId": "apostas_pendentes"}], "where": {"compositeFilter": {"op": "AND", "filters": [{"fieldFilter": {"field": {"fieldPath": "uid"}, "op": "EQUAL", "value": {"stringValue": uid}}}, {"fieldFilter": {"field": {"fieldPath": "status"}, "op": "EQUAL", "value": {"stringValue": "pendente"}}}]}}}}
+    query = {
+        "structuredQuery": {
+            "from": [{"collectionId": "apostas_pendentes"}],
+            "where": {
+                "compositeFilter": {
+                    "op": "AND",
+                    "filters": [
+                        {"fieldFilter": {"field": {"fieldPath": "uid"}, "op": "EQUAL", "value": {"stringValue": uid}}},
+                        {"fieldFilter": {"field": {"fieldPath": "status"}, "op": "EQUAL", "value": {"stringValue": "pendente"}}}
+                    ]
+                }
+            }
+        }
+    }
     return requests.post(url, headers=headers, json=query).json()
 
 def atualizar_status_aposta(document_name, id_token, acertos):
     url = f"https://firestore.googleapis.com/v1/{document_name}"
     headers = {"Authorization": f"Bearer {id_token}"}
-    requests.patch(url, headers=headers, json={"fields": {"status": {"stringValue": "conferido"}, "acertos": {"integerValue": str(acertos)}}})
+    payload = {"fields": {"status": {"stringValue": "conferido"}, "acertos": {"integerValue": str(acertos)}}}
+    requests.patch(url, headers=headers, json=payload)
 
-# --- AUTENTICAÇÃO ---
+# --- FUNÇÕES DE AUTENTICAÇÃO ---
 def registar_utilizador(email, password):
     url = f"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={FIREBASE_WEB_API_KEY}"
-    return requests.post(url, json={"email": email, "password": password, "returnSecureToken": True}).json()
+    payload = {"email": email, "password": password, "returnSecureToken": True}
+    return requests.post(url, json=payload).json()
 
 def iniciar_sessao(email, password):
     url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={FIREBASE_WEB_API_KEY}"
-    return requests.post(url, json={"email": email, "password": password, "returnSecureToken": True}).json()
+    payload = {"email": email, "password": password, "returnSecureToken": True}
+    return requests.post(url, json=payload).json()
 
 # --- CLASSE GERADOR ---
 class GeradorLoterias:
-    def __init__(self, caminho_historico, total_bolas, faixa_numeros, caminho_gerados):
+    def __init__(self, caminho_historico, total_bolas_sorteadas, faixa_numeros, caminho_gerados):
         self.caminho_historico = caminho_historico
         self.caminho_gerados = caminho_gerados
-        self.total_bolas = total_bolas
+        self.total_bolas = total_bolas_sorteadas
         self.faixa_numeros = faixa_numeros
-        self.historico_lista = []
+        self.historico_lista = [] 
         self.historico_oficial = self._carregar_historico()
         self.historico_gerados = self._carregar_gerados()
         self.jogos_proibidos = self.historico_oficial.union(self.historico_gerados)
 
     def conferir_acertos(self, jogo_gerado):
         if not self.historico_lista: return 0
-        return len(set(jogo_gerado).intersection(set(self.historico_lista[-1])))
+        ultimo_sorteio = set(self.historico_lista[-1])
+        return len(set(jogo_gerado).intersection(ultimo_sorteio))
 
     def obter_ultimo_concurso(self):
         try:
-            df = pd.read_csv(self.caminho_historico, encoding='latin1', sep=',', header=0)
-            return str(df.iloc[:, 0].dropna().iloc[-1])
+            try: df = pd.read_csv(self.caminho_historico, encoding='latin1', sep=',', header=0)
+            except: df = pd.read_csv(self.caminho_historico, encoding='latin1', sep=';', header=0)
+            coluna_zero = df.iloc[:, 0].dropna().astype(str)
+            return coluna_zero[coluna_zero.str.strip() != ''].iloc[-1]
         except: return "N/A"
+
+    def resetar_gerados(self):
+        if os.path.exists(self.caminho_gerados):
+            os.remove(self.caminho_gerados)
+            self.historico_gerados = set()
+            self.jogos_proibidos = self.historico_oficial 
+            return True
+        return False
 
     def _carregar_historico(self):
         jogos = set()
-        if not os.path.exists(self.caminho_historico): return jogos
+        if not os.path.exists(self.caminho_historico): 
+            return jogos
+            
         with open(self.caminho_historico, mode='r', encoding='latin1') as f:
-            leitor = csv.DictReader(f)
+            # Tenta ler com vírgula primeiro
+            leitor = csv.DictReader(f, delimiter=',')
+            
+            # Limpa espaços invisíveis dos nomes das colunas
+            if leitor.fieldnames:
+                leitor.fieldnames = [str(campo).strip() for campo in leitor.fieldnames]
+
+            # Se não achar a Bola1, tenta com ponto e vírgula
+            if 'Bola1' not in leitor.fieldnames:
+                f.seek(0)
+                leitor = csv.DictReader(f, delimiter=';')
+                if leitor.fieldnames:
+                    leitor.fieldnames = [str(campo).strip() for campo in leitor.fieldnames]
+
             for linha in leitor:
-                jogo = tuple(sorted([int(linha[f'Bola{i}']) for i in range(1, self.total_bolas + 1)]))
-                jogos.add(jogo); self.historico_lista.append(list(jogo))
+                try:
+                    # Limpa as chaves da linha para garantir que vai achar a 'Bola1'
+                    linha_limpa = {str(k).strip(): v for k, v in linha.items()}
+                    jogo = tuple(sorted([int(linha_limpa[f'Bola{i}']) for i in range(1, self.total_bolas + 1)]))
+                    jogos.add(jogo)
+                    self.historico_lista.append(list(jogo))
+                except Exception:
+                    # Se alguma linha estiver em branco ou defeituosa, ele apenas pula
+                    continue
+                    
         return jogos
 
     def _carregar_gerados(self):
@@ -137,76 +182,133 @@ class GeradorLoterias:
         if os.path.exists(self.caminho_gerados):
             with open(self.caminho_gerados, mode='r', encoding='utf-8') as f:
                 for linha in csv.reader(f):
-                    if 'Bola' not in str(linha[0]): jogos.add(tuple(sorted([int(x) for x in linha])))
+                    if not linha or 'Bola' in str(linha[0]): continue
+                    try: jogos.add(tuple(sorted([int(x) for x in linha])))
+                    except: continue
         return jogos
 
     def _salvar_gerados(self, novos_jogos):
+        if not novos_jogos: return
+        arquivo_existe = os.path.exists(self.caminho_gerados)
         with open(self.caminho_gerados, mode='a', newline='', encoding='utf-8') as f:
             escritor = csv.writer(f)
+            if not arquivo_existe:
+                escritor.writerow([f'Bola{i}' for i in range(1, len(novos_jogos[0]) + 1)])
             for jogo in novos_jogos: escritor.writerow(jogo)
 
-    def _gerar_base_com_ml(self, tamanho, modelo_escolhido):
-        if len(self.historico_lista) < 10: return sorted(random.sample(range(1, self.faixa_numeros + 1), tamanho))
-        X = self.historico_lista[:-1]; y = self.historico_lista[1:]; ultimo = [self.historico_lista[-1]]
+    def _gerar_base_com_ml(self, tamanho_base, modelo_escolhido):
+        if len(self.historico_lista) < 10: return sorted(random.sample(range(1, self.faixa_numeros + 1), tamanho_base))
+        X = self.historico_lista[:-1]; y = self.historico_lista[1:]; ultimo_sorteio = [self.historico_lista[-1]]
         if modelo_escolhido == "Random Forest": modelo = RandomForestRegressor(n_estimators=50, random_state=42)
         elif modelo_escolhido == "KNN (Vizinhos Próximos)": modelo = KNeighborsRegressor(n_neighbors=5)
         else: modelo = MLPRegressor(hidden_layer_sizes=(50, 50), max_iter=500, random_state=42)
-        modelo.fit(X, y); previsao = [int(round(p)) for p in modelo.predict(ultimo)[0]]
-        base = set(previsao).union(random.sample(range(1, self.faixa_numeros + 1), tamanho))
-        return sorted(list(base))[:tamanho]
+        modelo.fit(X, y); previsao = modelo.predict(ultimo_sorteio)[0]
+        numeros_preditos = set()
+        for p in previsao:
+            num = int(round(p)); num = max(1, min(self.faixa_numeros, num)); numeros_preditos.add(num)
+        while len(numeros_preditos) < tamanho_base: numeros_preditos.add(random.randint(1, self.faixa_numeros))
+        return sorted(list(numeros_preditos))[:tamanho_base]
 
     def _gerar_base_equilibrada(self, tamanho):
         pares = [n for n in range(2, self.faixa_numeros + 1, 2)]; impares = [n for n in range(1, self.faixa_numeros + 1, 2)]
-        return sorted(random.sample(pares, tamanho//2) + random.sample(impares, tamanho - tamanho//2))
+        qtd_pares = min(tamanho // 2, len(pares)); qtd_impares = tamanho - qtd_pares
+        if qtd_impares > len(impares): qtd_impares = len(impares); qtd_pares = tamanho - qtd_impares
+        return sorted(random.sample(pares, qtd_pares) + random.sample(impares, qtd_impares))
 
-    def gerar_jogos(self, tamanho_base, tamanho_bilhete, tecnica, equilibrar, usar_ml, modelo_ml, qtd=1):
+    def gerar_jogos(self, tamanho_base, tamanho_bilhete, tecnica, equilibrar, usar_ml, modelo_ml, quantidade_pedida=1):
         jogos_validados = []
-        while len(jogos_validados) < qtd:
-            base = self._gerar_base_com_ml(tamanho_base, modelo_ml) if usar_ml else (self._gerar_base_equilibrada(tamanho_base) if equilibrar else sorted(random.sample(range(1, self.faixa_numeros + 1), tamanho_base)))
-            jogo = tuple(sorted(random.sample(base, tamanho_bilhete)))
-            if not any(combo in self.jogos_proibidos for combo in itertools.combinations(jogo, self.total_bolas)):
-                jogos_validados.append(jogo)
-                for c in itertools.combinations(jogo, self.total_bolas): self.jogos_proibidos.add(c)
+        if tecnica == 'desdobramento' and tamanho_base > self.total_bolas:
+            tentativas = 0
+            while len(jogos_validados) < quantidade_pedida and tentativas < 2000:
+                tentativas += 1
+                base = self._gerar_base_com_ml(tamanho_base, modelo_ml) if usar_ml else (self._gerar_base_equilibrada(tamanho_base) if equilibrar else sorted(random.sample(range(1, self.faixa_numeros + 1), tamanho_base)))
+                possiveis = list(itertools.combinations(base, tamanho_bilhete))
+                if not any(any(combo in self.jogos_proibidos for combo in itertools.combinations(b, self.total_bolas)) for b in possiveis):
+                    jogos_validados.extend(possiveis)
+                    for b in possiveis:
+                        for c in itertools.combinations(b, self.total_bolas): self.jogos_proibidos.add(c)
+        else:
+            while len(jogos_validados) < quantidade_pedida:
+                jogo = tuple(self._gerar_base_com_ml(tamanho_base, modelo_ml)) if usar_ml else (tuple(self._gerar_base_equilibrada(tamanho_base)) if equilibrar else tuple(sorted(random.sample(range(1, self.faixa_numeros + 1), tamanho_base))))
+                if not any(combo in self.jogos_proibidos for combo in itertools.combinations(jogo, self.total_bolas)):
+                    jogos_validados.append(jogo)
+                    for c in itertools.combinations(jogo, self.total_bolas): self.jogos_proibidos.add(c)
         self._salvar_gerados(jogos_validados)
         return jogos_validados
 
 # --- LOGIN ---
 if "user_uid" not in st.session_state:
     st.title("🔒 GeraLoto - Acesso")
+    escolha = st.radio("Selecione:", ["Iniciar Sessão", "Criar Conta"])
     e = st.text_input("E-mail"); s = st.text_input("Senha", type="password")
     if st.button("Executar"):
-        res = iniciar_sessao(e, s)
+        res = registar_utilizador(e, s) if escolha == "Criar Conta" else iniciar_sessao(e, s)
         if "error" in res: st.error(res["error"]["message"])
         else:
-            st.session_state.update({"user_uid": res["localId"], "user_email": res["email"], "id_token": res["idToken"]})
-            st.rerun()
+            st.session_state["user_uid"] = res["localId"]; st.session_state["user_email"] = res["email"]; st.session_state["id_token"] = res["idToken"]; st.rerun()
     st.stop()
 
 # --- PAINEL ---
-st.sidebar.title("👤 Perfil"); st.sidebar.info(f"🪙 Saldo: {st.session_state.get('fichas', 0)}")
-if "fichas" not in st.session_state: st.session_state["fichas"] = obter_saldo_nuvem(st.session_state["user_uid"], st.session_state["id_token"])
+st.sidebar.title("👤 Perfil"); st.sidebar.success(st.session_state['user_email'])
+if "fichas" not in st.session_state: 
+    st.session_state["fichas"] = obter_saldo_nuvem(st.session_state["user_uid"], st.session_state["id_token"])
+st.sidebar.info(f"🪙 Saldo: {st.session_state['fichas']}")
+
+# ---> LEITURA AUTOMÁTICA DA URL (BACK URLS DO MERCADO PAGO) <---
+params = st.query_params
+if params.get("status") == "approved" and "payment_id" in params:
+    payment_id = params.get("payment_id")
+    
+    with st.spinner("Validando retorno do pagamento..."):
+        sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN"))
+        payment_info = sdk.payment().get(payment_id)
+        
+        if payment_info.get("status") == 200:
+            data = payment_info["response"]
+            
+            # Segurança dupla: Verifica se o pagamento é do usuário atual e está aprovado
+            if data.get("status") == "approved" and data.get("external_reference") == st.session_state["user_uid"]:
+                
+                # Só credita se tivermos salvo a quantidade de fichas antes de ir para o pagamento
+                if st.session_state.get("fichas_a_adicionar", 0) > 0:
+                    adicionar = st.session_state["fichas_a_adicionar"]
+                    novo_saldo = st.session_state["fichas"] + adicionar
+                    
+                    atualizar_saldo_nuvem(st.session_state["user_uid"], st.session_state["id_token"], novo_saldo)
+                    st.session_state["fichas"] = novo_saldo
+                    
+                    # Trava de segurança: zera a intenção de adição e limpa a URL do navegador
+                    st.session_state["fichas_a_adicionar"] = 0
+                    st.query_params.clear()
+                    
+                    st.sidebar.success(f"Pagamento automático confirmado! +{adicionar} fichas creditadas.")
 
 # --- ÁREA DE COMPRA ---
-st.sidebar.markdown("---"); st.sidebar.subheader("🛒 Comprar Fichas")
-pacotes = {"Pacote Iniciante (1000 fichas)": (1000, 10.00), "Pacote Pro (2500 fichas)": (2500, 22.00), "Pacote VIP (5000 fichas)": (5000, 40.00)}
+st.sidebar.markdown("---")
+st.sidebar.subheader("🛒 Comprar Fichas")
+
+pacotes = {
+    "Pacote Iniciante (1000 fichas)": (1000, 10.00),
+    "Pacote Pro (2500 fichas)": (2500, 22.00),
+    "Pacote VIP (5000 fichas)": (5000, 40.00)
+}
+
 escolha = st.sidebar.selectbox("Escolha seu pacote:", list(pacotes.keys()))
-qtd, valor = pacotes[escolha]
+qtd_fichas, valor = pacotes[escolha]
 
 if st.sidebar.button(f"Gerar Link: R$ {valor:.2f}"):
-    link, pref_id = criar_preferencia_pagamento(st.session_state["user_uid"], qtd, valor)
-    st.session_state.update({"link_pagamento": link, "fichas_a_adicionar": qtd})
+    with st.spinner("Gerando..."):
+        link, pref_id = criar_preferencia_pagamento(st.session_state["user_uid"], qtd_fichas, valor)
+        st.session_state["link_pagamento"] = link
+        st.session_state["pref_id"] = pref_id
+        st.session_state["fichas_a_adicionar"] = qtd_fichas 
 
-if st.session_state.get("link_pagamento"): st.sidebar.link_button("Pagar Agora", st.session_state["link_pagamento"])
+if st.session_state.get("link_pagamento"):
+    st.sidebar.link_button("Ir para o Pagamento", st.session_state["link_pagamento"])
 
-if st.sidebar.button("Verificar Pagamento"):
-    if verificar_pagamento_aprovado():
-        adicionar = st.session_state.get("fichas_a_adicionar", 1000)
-        novo_saldo = st.session_state["fichas"] + adicionar
-        atualizar_saldo_nuvem(st.session_state["user_uid"], st.session_state["id_token"], novo_saldo)
-        st.session_state["fichas"] = novo_saldo; st.success("Fichas creditadas!")
-    else: st.error("Pagamento não localizado.")
-
-if st.sidebar.button("🚪 Sair"): st.session_state.clear(); st.rerun()
+if st.sidebar.button("🚪 Sair"): 
+    st.session_state.clear()
+    st.rerun()
 
 # --- GERADOR ---
 st.title("🎲 Gerador Premium")
